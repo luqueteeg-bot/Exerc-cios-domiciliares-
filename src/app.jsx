@@ -427,6 +427,8 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  const [showAddPatient, setShowAddPatient] = useState(false);
+  const [showAddExercise, setShowAddExercise] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -462,6 +464,16 @@ export default function App() {
     setPatients((ps) =>
       ps.map((p) => (p.id === patient.id ? { ...p, assigned: p.assigned.filter((a) => a.instanceId !== instanceId) } : p))
     );
+  }
+
+  function addPatient(name, condition) {
+    const newPatient = { id: uid(), name, condition, assigned: [], sessions: [], appointments: [] };
+    setPatients((ps) => [...ps, newPatient]);
+    setSelectedPatientId(newPatient.id);
+  }
+
+  function addLibraryExercise(exerciseData) {
+    setLibrary((lib) => [...lib, { id: uid(), ...exerciseData }]);
   }
 
   function addAppointment(dateStr, timeStr, notes) {
@@ -559,6 +571,8 @@ export default function App() {
             setShowAssign={setShowAssign}
             removeAssigned={removeAssigned}
             setShowSchedule={setShowSchedule}
+            setShowAddPatient={setShowAddPatient}
+            setShowAddExercise={setShowAddExercise}
           />
         ) : (
           <PacienteView
@@ -593,6 +607,24 @@ export default function App() {
           }}
         />
       )}
+      {showAddPatient && (
+        <AddPatientModal
+          onClose={() => setShowAddPatient(false)}
+          onSave={(name, condition) => {
+            addPatient(name, condition);
+            setShowAddPatient(false);
+          }}
+        />
+      )}
+      {showAddExercise && (
+        <AddExerciseModal
+          onClose={() => setShowAddExercise(false)}
+          onSave={(data) => {
+            addLibraryExercise(data);
+            setShowAddExercise(false);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -605,7 +637,7 @@ function Card({ children, style }) {
   );
 }
 
-function FisioView({ tab, setTab, patients, patient, selectedPatientId, setSelectedPatientId, library, setLibrary, assignedFull, setShowAssign, removeAssigned, setShowSchedule }) {
+function FisioView({ tab, setTab, patients, patient, selectedPatientId, setSelectedPatientId, library, setLibrary, assignedFull, setShowAssign, removeAssigned, setShowSchedule, setShowAddPatient, setShowAddExercise }) {
   return (
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -632,7 +664,12 @@ function FisioView({ tab, setTab, patients, patient, selectedPatientId, setSelec
       {tab === "pacientes" && patient && (
         <>
           <Card>
-            <label style={{ fontSize: 12, color: "#6B6558", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Paciente</label>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <label style={{ fontSize: 12, color: "#6B6558", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Paciente</label>
+              <button onClick={() => setShowAddPatient(true)} style={{ ...btnSecondary, padding: "5px 10px", fontSize: 12.5 }}>
+                <Plus size={13} /> Novo paciente
+              </button>
+            </div>
             <select
               value={selectedPatientId}
               onChange={(e) => setSelectedPatientId(e.target.value)}
@@ -708,8 +745,15 @@ function FisioView({ tab, setTab, patients, patient, selectedPatientId, setSelec
 
       {tab === "biblioteca" && (
         <Card>
-          <h3 style={{ margin: "0 0 4px", fontFamily: "'Fraunces', serif", fontSize: 17 }}>Biblioteca de exercícios</h3>
-          <p style={{ fontSize: 13, color: "#6B6558", marginTop: 0 }}>Exercícios pré-cadastrados por categoria, prontos para atribuir a qualquer paciente.</p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
+            <div>
+              <h3 style={{ margin: 0, fontFamily: "'Fraunces', serif", fontSize: 17 }}>Biblioteca de exercícios</h3>
+              <p style={{ fontSize: 13, color: "#6B6558", marginTop: 4, marginBottom: 0 }}>Exercícios prontos para atribuir a qualquer paciente.</p>
+            </div>
+            <button onClick={() => setShowAddExercise(true)} style={{ ...btnSecondary, padding: "6px 12px", fontSize: 13, flexShrink: 0 }}>
+              <Plus size={15} /> Novo
+            </button>
+          </div>
           {library.map((ex) => (
             <div key={ex.id} style={{ padding: "10px 0", borderBottom: "1px solid #F0EEE7" }}>
               <div style={{ fontWeight: 600, fontSize: 14.5 }}>{ex.name}</div>
@@ -833,6 +877,81 @@ function AssignModal({ library, onClose, onAssign }) {
         style={{ ...btnPrimary, width: "100%", justifyContent: "center", marginTop: 18 }}
       >
         Atribuir ao paciente
+      </button>
+    </ModalShell>
+  );
+}
+
+function AddPatientModal({ onClose, onSave }) {
+  const [name, setName] = useState("");
+  const [condition, setCondition] = useState("");
+  return (
+    <ModalShell title="Novo paciente" onClose={onClose}>
+      <label style={labelStyle}>Nome do paciente</label>
+      <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: João Carlos" style={inputStyle} />
+      <label style={{ ...labelStyle, marginTop: 12 }}>Condição / diagnóstico</label>
+      <input type="text" value={condition} onChange={(e) => setCondition(e.target.value)} placeholder="Ex: Pós-operatório de LCA" style={inputStyle} />
+      <button
+        disabled={!name.trim()}
+        onClick={() => onSave(name.trim(), condition.trim())}
+        style={{ ...btnPrimary, width: "100%", justifyContent: "center", marginTop: 18, opacity: !name.trim() ? 0.5 : 1 }}
+      >
+        Criar paciente
+      </button>
+    </ModalShell>
+  );
+}
+
+function AddExerciseModal({ onClose, onSave }) {
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState("");
+  const [steps, setSteps] = useState("");
+  const [sets, setSets] = useState(3);
+  const [reps, setReps] = useState(10);
+  const [holdSeconds, setHoldSeconds] = useState(0);
+  const [restSeconds, setRestSeconds] = useState(30);
+  const [variant, setVariant] = useState("generic");
+  return (
+    <ModalShell title="Novo exercício na biblioteca" onClose={onClose}>
+      <label style={labelStyle}>Nome do exercício</label>
+      <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Agachamento na parede" style={inputStyle} />
+      <label style={{ ...labelStyle, marginTop: 12 }}>Categoria</label>
+      <input type="text" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Ex: Joelho" style={inputStyle} />
+      <label style={{ ...labelStyle, marginTop: 12 }}>Como fazer (instruções)</label>
+      <textarea value={steps} onChange={(e) => setSteps(e.target.value)} placeholder="Descreva o movimento passo a passo" style={{ ...inputStyle, minHeight: 70, fontFamily: "'Inter', sans-serif", resize: "vertical" }} />
+      <label style={{ ...labelStyle, marginTop: 12 }}>Animação do personagem</label>
+      <select value={variant} onChange={(e) => setVariant(e.target.value)} style={inputStyle}>
+        <option value="generic">Movimento geral</option>
+        <option value="legraise">Elevação de perna</option>
+        <option value="bridge">Ponte / quadril</option>
+        <option value="arm">Braço / ombro</option>
+      </select>
+      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+        <div style={{ flex: 1 }}>
+          <label style={labelStyle}>Séries</label>
+          <input type="number" min={1} value={sets} onChange={(e) => setSets(+e.target.value)} style={inputStyle} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={labelStyle}>Repetições</label>
+          <input type="number" min={1} value={reps} onChange={(e) => setReps(+e.target.value)} style={inputStyle} />
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+        <div style={{ flex: 1 }}>
+          <label style={labelStyle}>Segurar (s)</label>
+          <input type="number" min={0} value={holdSeconds} onChange={(e) => setHoldSeconds(+e.target.value)} style={inputStyle} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={labelStyle}>Descanso (s)</label>
+          <input type="number" min={0} value={restSeconds} onChange={(e) => setRestSeconds(+e.target.value)} style={inputStyle} />
+        </div>
+      </div>
+      <button
+        disabled={!name.trim() || !steps.trim()}
+        onClick={() => onSave({ name: name.trim(), category: category.trim() || "Geral", steps: steps.trim(), sets, reps, holdSeconds, restSeconds, variant, videoUrl: null })}
+        style={{ ...btnPrimary, width: "100%", justifyContent: "center", marginTop: 18, opacity: !name.trim() || !steps.trim() ? 0.5 : 1 }}
+      >
+        Adicionar à biblioteca
       </button>
     </ModalShell>
   );
