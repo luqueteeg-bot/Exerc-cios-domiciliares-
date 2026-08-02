@@ -87,6 +87,15 @@ function useFonts() {
     link.href =
       "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap";
     document.head.appendChild(link);
+
+    if (!document.querySelector('meta[name="google"]')) {
+      const meta = document.createElement("meta");
+      meta.name = "google";
+      meta.content = "notranslate";
+      document.head.appendChild(meta);
+    }
+    document.documentElement.setAttribute("translate", "no");
+    document.documentElement.classList.add("notranslate");
   }, []);
 }
 
@@ -920,7 +929,7 @@ function FisioView({ tab, setTab, patients, patient, selectedPatientId, setSelec
                 <Plus size={15} /> Adicionar
               </button>
             </div>
-            <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", paddingBottom: 2 }}>
+            <div translate="no" className="notranslate" style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", paddingBottom: 2 }}>
               {WEEKDAYS.map((d) => (
                 <button
                   key={d.key}
@@ -1134,7 +1143,7 @@ function PacienteView({ patients, patient, selectedPatientId, setSelectedPatient
         <p style={{ fontSize: 12, color: "#8A8574", margin: "0 0 8px" }}>
           Não conseguiu fazer num dia? Escolha outro dia da semana para fazer a rotina dele agora.
         </p>
-        <div style={{ display: "flex", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 2 }}>
+        <div translate="no" className="notranslate" style={{ display: "flex", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 2 }}>
           {WEEKDAYS.map((d) => (
             <button
               key={d.key}
