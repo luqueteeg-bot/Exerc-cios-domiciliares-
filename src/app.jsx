@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { Play, Pause, RotateCcw, Check, ChevronRight, Plus, Calendar, TrendingUp, Dumbbell, Users, X, ClipboardList, Volume2, VolumeX } from "lucide-react";
+import { Play, Pause, RotateCcw, Check, ChevronRight, Plus, Calendar, TrendingUp, Dumbbell, Users, X, ClipboardList, Volume2, VolumeX, Pencil, Trash2 } from "lucide-react";
 
 // ---- Áudio (síntese de voz em pt-BR) ----
 function speak(text, enabled) {
@@ -90,7 +90,66 @@ function useFonts() {
   }, []);
 }
 
+// ---- Ajuda para converter arquivos enviados em imagem/vídeo para uso no app ----
+function compressImageToDataUrl(file, maxWidth = 420, quality = 0.68) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve(e.target.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+function getYouTubeEmbedId(url) {
+  if (!url) return null;
+  const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/))([\w-]{11})/);
+  return m ? m[1] : null;
+}
+function getGoogleDriveFileId(url) {
+  if (!url) return null;
+  const m = url.match(/drive\.google\.com\/file\/d\/([\w-]+)/) || url.match(/[?&]id=([\w-]+)/);
+  return m ? m[1] : null;
+}
+
 const uid = () => Math.random().toString(36).slice(2, 10);
+
+const WEEKDAYS = [
+  { key: "dom", label: "Domingo", short: "Dom" },
+  { key: "seg", label: "Segunda-feira", short: "Seg" },
+  { key: "ter", label: "Terça-feira", short: "Ter" },
+  { key: "qua", label: "Quarta-feira", short: "Qua" },
+  { key: "qui", label: "Quinta-feira", short: "Qui" },
+  { key: "sex", label: "Sexta-feira", short: "Sex" },
+  { key: "sab", label: "Sábado", short: "Sáb" },
+];
+function todayKey() {
+  return WEEKDAYS[new Date().getDay()].key;
+}
+function emptyWeek() {
+  const w = {};
+  WEEKDAYS.forEach((d) => { w[d.key] = []; });
+  return w;
+}
 
 const DEFAULT_LIBRARY = [
   { id: uid(), name: "Bombeamento de tornozelo", category: "Tornozelo/Pé", steps: "Deitado ou sentado, mova o pé para cima e para baixo lentamente, como se estivesse pisando em um pedal.", sets: 3, reps: 15, holdSeconds: 0, restSeconds: 30, variant: "generic", videoUrl: null },
@@ -108,9 +167,10 @@ const DEFAULT_PATIENTS = [
     id: uid(),
     name: "Maria Oliveira",
     condition: "Pós-operatório de LCA — joelho direito",
-    assigned: [],
+    weeklyPlan: emptyWeek(),
     sessions: [],
     appointments: [],
+    painLogs: [],
   },
 ];
 
@@ -125,9 +185,31 @@ async function loadShared(key, fallback) {
 async function saveShared(key, value) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    return true;
   } catch (e) {
     console.error("storage error", e);
+    return false;
   }
+}
+
+function PainChart({ painLogs }) {
+  const data = [...(painLogs || [])]
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .map((l) => ({ date: new Date(l.date).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }), dor: l.value }));
+  if (data.length === 0) {
+    return <p style={{ color: "#6B6558", fontSize: 14 }}>Ainda sem registros de dor (EVA) deste paciente.</p>;
+  }
+  return (
+    <ResponsiveContainer width="100%" height={180}>
+      <LineChart data={data}>
+        <CartesianGrid stroke="#E1DED4" strokeDasharray="3 3" />
+        <XAxis dataKey="date" tick={{ fontSize: 11, fill: "#6B6558" }} />
+        <YAxis domain={[0, 10]} tick={{ fontSize: 11, fill: "#6B6558" }} />
+        <Tooltip />
+        <Line type="monotone" dataKey="dor" stroke="#C97A3A" strokeWidth={3} dot={{ r: 4 }} />
+      </LineChart>
+    </ResponsiveContainer>
+  );
 }
 
 function CircularTimer({ totalSeconds, secondsLeft, label, color = "#2F6F62" }) {
@@ -315,8 +397,24 @@ function ExercisePlayer({ patient, onFinish, onClose }) {
         </div>
       </div>
 
-      {current.videoUrl ? (
+      {current.videoUrl && getYouTubeEmbedId(current.videoUrl) ? (
+        <iframe
+          src={`https://www.youtube.com/embed/${getYouTubeEmbedId(current.videoUrl)}?autoplay=1&mute=1&loop=1&playlist=${getYouTubeEmbedId(current.videoUrl)}`}
+          style={{ width: "100%", aspectRatio: "16/9", borderRadius: 12, marginBottom: 12, border: "none" }}
+          allow="autoplay"
+          title="Demonstração do exercício"
+        />
+      ) : current.videoUrl && getGoogleDriveFileId(current.videoUrl) ? (
+        <iframe
+          src={`https://drive.google.com/file/d/${getGoogleDriveFileId(current.videoUrl)}/preview`}
+          style={{ width: "100%", aspectRatio: "16/9", borderRadius: 12, marginBottom: 12, border: "none" }}
+          allow="autoplay"
+          title="Demonstração do exercício"
+        />
+      ) : current.videoUrl ? (
         <video src={current.videoUrl} controls autoPlay loop muted style={{ width: "100%", borderRadius: 12, marginBottom: 12 }} />
+      ) : current.imageUrl ? (
+        <img src={current.imageUrl} alt={current.name} style={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 12, marginBottom: 12 }} />
       ) : (
         <div style={{ background: "#F6F5F1", borderRadius: 12, padding: "12px 0 4px", marginBottom: 8 }}>
           <CartoonCharacter variant={current.variant} active={running} />
@@ -429,11 +527,30 @@ export default function App() {
   const [showSchedule, setShowSchedule] = useState(false);
   const [showAddPatient, setShowAddPatient] = useState(false);
   const [showAddExercise, setShowAddExercise] = useState(false);
+  const [editingPatient, setEditingPatient] = useState(null);
+  const [editingExercise, setEditingExercise] = useState(null);
+  const [selectedDay, setSelectedDay] = useState(todayKey());
+  const [patientViewDay, setPatientViewDay] = useState(todayKey());
+  const [storageWarning, setStorageWarning] = useState("");
 
   useEffect(() => {
     (async () => {
       const lib = await loadShared("hep-library", DEFAULT_LIBRARY);
-      const pats = await loadShared("hep-patients", DEFAULT_PATIENTS);
+      const patsRaw = await loadShared("hep-patients", DEFAULT_PATIENTS);
+      // migração: pacientes salvos antes da agenda semanal tinham uma lista única "assigned"
+      const pats = patsRaw.map((p) => {
+        let next = p;
+        if (!next.weeklyPlan) {
+          const week = emptyWeek();
+          if (Array.isArray(next.assigned)) {
+            WEEKDAYS.forEach((d) => { week[d.key] = next.assigned.map((a) => ({ ...a })); });
+          }
+          const { assigned, ...rest } = next;
+          next = { ...rest, weeklyPlan: week };
+        }
+        if (!Array.isArray(next.painLogs)) next = { ...next, painLogs: [] };
+        return next;
+      });
       setLibrary(lib);
       setPatients(pats);
       setSelectedPatientId(pats[0]?.id ?? null);
@@ -442,38 +559,68 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (loaded) saveShared("hep-patients", patients);
+    if (!loaded) return;
+    saveShared("hep-patients", patients).then((ok) => {
+      if (!ok) setStorageWarning("Não foi possível salvar as últimas alterações — provavelmente uma foto ou vídeo anexado é grande demais para o armazenamento do navegador. Tente remover o arquivo e usar um link em vez disso.");
+    });
   }, [patients, loaded]);
   useEffect(() => {
-    if (loaded) saveShared("hep-library", library);
+    if (!loaded) return;
+    saveShared("hep-library", library).then((ok) => {
+      if (!ok) setStorageWarning("Não foi possível salvar as últimas alterações — provavelmente uma foto ou vídeo anexado é grande demais para o armazenamento do navegador. Tente remover o arquivo e usar um link em vez disso.");
+    });
   }, [library, loaded]);
 
   const patient = patients.find((p) => p.id === selectedPatientId) || patients[0];
 
-  function assignExercise(exerciseId, params) {
+  function assignExercise(dayKey, exerciseId, params) {
     setPatients((ps) =>
       ps.map((p) =>
         p.id === patient.id
-          ? { ...p, assigned: [...p.assigned, { ...params, exerciseId, instanceId: uid() }] }
+          ? { ...p, weeklyPlan: { ...p.weeklyPlan, [dayKey]: [...p.weeklyPlan[dayKey], { ...params, exerciseId, instanceId: uid() }] } }
           : p
       )
     );
   }
 
-  function removeAssigned(instanceId) {
+  function removeAssigned(dayKey, instanceId) {
     setPatients((ps) =>
-      ps.map((p) => (p.id === patient.id ? { ...p, assigned: p.assigned.filter((a) => a.instanceId !== instanceId) } : p))
+      ps.map((p) =>
+        p.id === patient.id
+          ? { ...p, weeklyPlan: { ...p.weeklyPlan, [dayKey]: p.weeklyPlan[dayKey].filter((a) => a.instanceId !== instanceId) } }
+          : p
+      )
     );
   }
 
   function addPatient(name, condition) {
-    const newPatient = { id: uid(), name, condition, assigned: [], sessions: [], appointments: [] };
+    const newPatient = { id: uid(), name, condition, weeklyPlan: emptyWeek(), sessions: [], appointments: [], painLogs: [] };
     setPatients((ps) => [...ps, newPatient]);
     setSelectedPatientId(newPatient.id);
   }
 
+  function editPatient(id, name, condition) {
+    setPatients((ps) => ps.map((p) => (p.id === id ? { ...p, name, condition } : p)));
+  }
+
+  function deletePatient(id) {
+    setPatients((ps) => {
+      const next = ps.filter((p) => p.id !== id);
+      if (id === selectedPatientId) setSelectedPatientId(next[0]?.id ?? null);
+      return next;
+    });
+  }
+
   function addLibraryExercise(exerciseData) {
     setLibrary((lib) => [...lib, { id: uid(), ...exerciseData }]);
+  }
+
+  function editLibraryExercise(id, data) {
+    setLibrary((lib) => lib.map((e) => (e.id === id ? { ...e, ...data } : e)));
+  }
+
+  function deleteLibraryExercise(id) {
+    setLibrary((lib) => lib.filter((e) => e.id !== id));
   }
 
   function addAppointment(dateStr, timeStr, notes) {
@@ -497,7 +644,7 @@ export default function App() {
                 {
                   id: uid(),
                   date: new Date().toISOString(),
-                  assignedCount: p.assigned.length,
+                  assignedCount: p.weeklyPlan[patientViewDay].length,
                   completed: completedInstanceIds,
                 },
               ],
@@ -508,15 +655,29 @@ export default function App() {
     setPlaying(false);
   }
 
-  const assignedFull = patient
-    ? patient.assigned
-        .map((a) => {
-          const ex = library.find((e) => e.id === a.exerciseId);
-          if (!ex) return null;
-          return { ...ex, ...a, id: a.instanceId };
-        })
-        .filter(Boolean)
-    : [];
+  function recordPain(value) {
+    const dateKey = new Date().toISOString().slice(0, 10);
+    setPatients((ps) =>
+      ps.map((p) => {
+        if (p.id !== patient.id) return p;
+        const others = (p.painLogs || []).filter((l) => l.dateKey !== dateKey);
+        return { ...p, painLogs: [...others, { id: uid(), dateKey, date: new Date().toISOString(), value }] };
+      })
+    );
+  }
+
+  function buildFullList(dayList) {
+    return (dayList || [])
+      .map((a) => {
+        const ex = library.find((e) => e.id === a.exerciseId);
+        if (!ex) return null;
+        return { ...ex, ...a, id: a.instanceId };
+      })
+      .filter(Boolean);
+  }
+
+  const fisioAssignedFull = patient ? buildFullList(patient.weeklyPlan[selectedDay]) : [];
+  const patientDayAssignedFull = patient ? buildFullList(patient.weeklyPlan[patientViewDay]) : [];
 
   if (!loaded) {
     return <div style={{ padding: 40, fontFamily: "'Inter', sans-serif", color: "#6B6558" }}>Carregando…</div>;
@@ -556,6 +717,17 @@ export default function App() {
         </div>
       </header>
 
+      {storageWarning && (
+        <div style={{ maxWidth: 480, margin: "12px auto 0", padding: "0 20px" }}>
+          <div style={{ background: "#FBEBE6", border: "1px solid #E3B7A6", borderRadius: 10, padding: 12, fontSize: 13, color: "#8A3F2A", display: "flex", justifyContent: "space-between", gap: 10 }}>
+            <span>{storageWarning}</span>
+            <button onClick={() => setStorageWarning("")} style={{ background: "none", border: "none", cursor: "pointer", color: "#8A3F2A", flexShrink: 0 }}>
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
       <main style={{ maxWidth: 480, margin: "0 auto", padding: "20px 20px 60px" }}>
         {role === "fisio" ? (
           <FisioView
@@ -566,13 +738,18 @@ export default function App() {
             selectedPatientId={selectedPatientId}
             setSelectedPatientId={setSelectedPatientId}
             library={library}
-            setLibrary={setLibrary}
-            assignedFull={assignedFull}
+            assignedFull={fisioAssignedFull}
             setShowAssign={setShowAssign}
             removeAssigned={removeAssigned}
             setShowSchedule={setShowSchedule}
             setShowAddPatient={setShowAddPatient}
             setShowAddExercise={setShowAddExercise}
+            selectedDay={selectedDay}
+            setSelectedDay={setSelectedDay}
+            onEditPatient={(p) => { setEditingPatient(p); setShowAddPatient(true); }}
+            onDeletePatient={deletePatient}
+            onEditExercise={(ex) => { setEditingExercise(ex); setShowAddExercise(true); }}
+            onDeleteExercise={deleteLibraryExercise}
           />
         ) : (
           <PacienteView
@@ -580,10 +757,13 @@ export default function App() {
             patient={patient}
             selectedPatientId={selectedPatientId}
             setSelectedPatientId={setSelectedPatientId}
-            assignedFull={assignedFull}
+            assignedFull={patientDayAssignedFull}
             playing={playing}
             setPlaying={setPlaying}
             logSession={logSession}
+            viewDay={patientViewDay}
+            setViewDay={setPatientViewDay}
+            recordPain={recordPain}
           />
         )}
       </main>
@@ -591,9 +771,10 @@ export default function App() {
       {showAssign && patient && (
         <AssignModal
           library={library}
+          dayLabel={WEEKDAYS.find((d) => d.key === selectedDay)?.label}
           onClose={() => setShowAssign(false)}
           onAssign={(exId, params) => {
-            assignExercise(exId, params);
+            assignExercise(selectedDay, exId, params);
             setShowAssign(false);
           }}
         />
@@ -609,25 +790,43 @@ export default function App() {
       )}
       {showAddPatient && (
         <AddPatientModal
-          onClose={() => setShowAddPatient(false)}
+          initial={editingPatient}
+          onClose={() => { setShowAddPatient(false); setEditingPatient(null); }}
           onSave={(name, condition) => {
-            addPatient(name, condition);
+            if (editingPatient) editPatient(editingPatient.id, name, condition);
+            else addPatient(name, condition);
             setShowAddPatient(false);
+            setEditingPatient(null);
           }}
         />
       )}
       {showAddExercise && (
         <AddExerciseModal
-          onClose={() => setShowAddExercise(false)}
+          initial={editingExercise}
+          onClose={() => { setShowAddExercise(false); setEditingExercise(null); }}
           onSave={(data) => {
-            addLibraryExercise(data);
+            if (editingExercise) editLibraryExercise(editingExercise.id, data);
+            else addLibraryExercise(data);
             setShowAddExercise(false);
+            setEditingExercise(null);
           }}
         />
       )}
     </div>
   );
 }
+
+const iconBtnStyle = {
+  background: "#F6F5F1",
+  border: "1px solid #E1DED4",
+  borderRadius: 8,
+  padding: 7,
+  cursor: "pointer",
+  color: "#6B6558",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+};
 
 function Card({ children, style }) {
   return (
@@ -637,7 +836,7 @@ function Card({ children, style }) {
   );
 }
 
-function FisioView({ tab, setTab, patients, patient, selectedPatientId, setSelectedPatientId, library, setLibrary, assignedFull, setShowAssign, removeAssigned, setShowSchedule, setShowAddPatient, setShowAddExercise }) {
+function FisioView({ tab, setTab, patients, patient, selectedPatientId, setSelectedPatientId, library, assignedFull, setShowAssign, removeAssigned, setShowSchedule, setShowAddPatient, setShowAddExercise, selectedDay, setSelectedDay, onEditPatient, onDeletePatient, onEditExercise, onDeleteExercise }) {
   return (
     <div>
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
@@ -679,18 +878,53 @@ function FisioView({ tab, setTab, patients, patient, selectedPatientId, setSelec
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
-            <p style={{ fontSize: 13, color: "#6B6558", marginTop: 8, marginBottom: 0 }}>{patient.condition}</p>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", marginTop: 8 }}>
+              <p style={{ fontSize: 13, color: "#6B6558", margin: 0 }}>{patient.condition}</p>
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <button onClick={() => onEditPatient(patient)} aria-label="Editar paciente" style={iconBtnStyle}>
+                  <Pencil size={14} />
+                </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Remover "${patient.name}"? Isso apaga toda a rotina e o histórico dele.`)) onDeletePatient(patient.id);
+                  }}
+                  aria-label="Remover paciente"
+                  style={{ ...iconBtnStyle, color: "#B5493A" }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+            </div>
           </Card>
 
           <Card>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <h3 style={{ margin: 0, fontFamily: "'Fraunces', serif", fontSize: 17 }}>Rotina atribuída</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <h3 style={{ margin: 0, fontFamily: "'Fraunces', serif", fontSize: 17 }}>Rotina da semana</h3>
               <button onClick={() => setShowAssign(true)} style={{ ...btnSecondary, padding: "6px 12px", fontSize: 13 }}>
                 <Plus size={15} /> Adicionar
               </button>
             </div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 14, overflowX: "auto", paddingBottom: 2 }}>
+              {WEEKDAYS.map((d) => (
+                <button
+                  key={d.key}
+                  onClick={() => setSelectedDay(d.key)}
+                  style={{
+                    flexShrink: 0, padding: "6px 12px", borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                    border: selectedDay === d.key ? "1px solid #2F6F62" : "1px solid #E1DED4",
+                    background: selectedDay === d.key ? "#2F6F62" : "#fff",
+                    color: selectedDay === d.key ? "#fff" : "#6B6558",
+                  }}
+                >
+                  {d.short}
+                </button>
+              ))}
+            </div>
+            <p style={{ fontSize: 12.5, color: "#8A8574", margin: "-6px 0 10px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              {WEEKDAYS.find((d) => d.key === selectedDay)?.label}
+            </p>
             {assignedFull.length === 0 ? (
-              <p style={{ color: "#6B6558", fontSize: 14 }}>Nenhum exercício atribuído ainda a este paciente.</p>
+              <p style={{ color: "#6B6558", fontSize: 14 }}>Nenhum exercício atribuído para este dia.</p>
             ) : (
               assignedFull.map((ex) => (
                 <div key={ex.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #F0EEE7" }}>
@@ -698,7 +932,7 @@ function FisioView({ tab, setTab, patients, patient, selectedPatientId, setSelec
                     <div style={{ fontWeight: 600, fontSize: 14.5 }}>{ex.name}</div>
                     <div style={{ fontSize: 12.5, color: "#6B6558" }}>{ex.sets}x{ex.reps} · descanso {ex.restSeconds}s</div>
                   </div>
-                  <button onClick={() => removeAssigned(ex.id)} style={{ background: "none", border: "none", color: "#B5493A", cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}>
+                  <button onClick={() => removeAssigned(selectedDay, ex.id)} style={{ background: "none", border: "none", color: "#B5493A", cursor: "pointer", fontSize: 12.5, fontWeight: 600 }}>
                     Remover
                   </button>
                 </div>
@@ -715,6 +949,14 @@ function FisioView({ tab, setTab, patients, patient, selectedPatientId, setSelec
             <div style={{ marginTop: 8, fontSize: 13, color: "#6B6558" }}>
               {patient.sessions.length} sessão(ões) registrada(s) no total.
             </div>
+          </Card>
+
+          <Card>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+              <TrendingUp size={16} color="#C97A3A" />
+              <h3 style={{ margin: 0, fontFamily: "'Fraunces', serif", fontSize: 17 }}>Escala de dor (EVA)</h3>
+            </div>
+            <PainChart painLogs={patient.painLogs} />
           </Card>
 
           <Card>
@@ -756,9 +998,27 @@ function FisioView({ tab, setTab, patients, patient, selectedPatientId, setSelec
           </div>
           {library.map((ex) => (
             <div key={ex.id} style={{ padding: "10px 0", borderBottom: "1px solid #F0EEE7" }}>
-              <div style={{ fontWeight: 600, fontSize: 14.5 }}>{ex.name}</div>
-              <div style={{ fontSize: 12, color: "#2F6F62", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{ex.category}</div>
-              <div style={{ fontSize: 13, color: "#6B6558", marginTop: 4 }}>{ex.steps}</div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14.5 }}>{ex.name}</div>
+                  <div style={{ fontSize: 12, color: "#2F6F62", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em" }}>{ex.category}</div>
+                  <div style={{ fontSize: 13, color: "#6B6558", marginTop: 4 }}>{ex.steps}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  <button onClick={() => onEditExercise(ex)} aria-label="Editar exercício" style={iconBtnStyle}>
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (window.confirm(`Remover "${ex.name}" da biblioteca? Ele será retirado das rotinas onde estiver atribuído.`)) onDeleteExercise(ex.id);
+                    }}
+                    aria-label="Remover exercício"
+                    style={{ ...iconBtnStyle, color: "#B5493A" }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
             </div>
           ))}
         </Card>
@@ -767,7 +1027,64 @@ function FisioView({ tab, setTab, patients, patient, selectedPatientId, setSelec
   );
 }
 
-function PacienteView({ patients, patient, selectedPatientId, setSelectedPatientId, assignedFull, playing, setPlaying, logSession }) {
+function EvaScaleCard({ patient, recordPain }) {
+  const dateKey = new Date().toISOString().slice(0, 10);
+  const todayLog = (patient.painLogs || []).find((l) => l.dateKey === dateKey);
+  const [value, setValue] = useState(todayLog ? todayLog.value : 5);
+  const [editing, setEditing] = useState(!todayLog);
+
+  const faceColor = (v) => {
+    if (v <= 2) return "#4E8F73";
+    if (v <= 5) return "#C9A227";
+    if (v <= 7) return "#D9822B";
+    return "#B5493A";
+  };
+
+  return (
+    <Card>
+      <h3 style={{ margin: "0 0 4px", fontFamily: "'Fraunces', serif", fontSize: 17 }}>Escala de dor (EVA)</h3>
+      <p style={{ fontSize: 13, color: "#6B6558", marginTop: 2, marginBottom: 12 }}>Marque de 0 (sem dor) a 10 (pior dor possível) como você está agora.</p>
+      {!editing && todayLog ? (
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 32, fontWeight: 600, color: faceColor(todayLog.value) }}>{todayLog.value}</span>
+            <span style={{ fontSize: 13, color: "#6B6558" }}>/ 10 registrado hoje</span>
+          </div>
+          <button onClick={() => setEditing(true)} style={{ ...btnSecondary, padding: "7px 12px", fontSize: 12.5 }}>
+            <Pencil size={13} /> Editar
+          </button>
+        </div>
+      ) : (
+        <div>
+          <div style={{ textAlign: "center", marginBottom: 10 }}>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 40, fontWeight: 600, color: faceColor(value) }}>{value}</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={10}
+            step={1}
+            value={value}
+            onChange={(e) => setValue(+e.target.value)}
+            style={{ width: "100%", accentColor: faceColor(value) }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#8A8574", marginTop: 4 }}>
+            <span>Sem dor</span>
+            <span>Pior dor possível</span>
+          </div>
+          <button
+            onClick={() => { recordPain(value); setEditing(false); }}
+            style={{ ...btnPrimary, width: "100%", justifyContent: "center", marginTop: 14 }}
+          >
+            Salvar registro de hoje
+          </button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function PacienteView({ patients, patient, selectedPatientId, setSelectedPatientId, assignedFull, playing, setPlaying, logSession, viewDay, setViewDay, recordPain }) {
   if (playing) {
     return (
       <Card style={{ padding: 8 }}>
@@ -775,6 +1092,7 @@ function PacienteView({ patients, patient, selectedPatientId, setSelectedPatient
       </Card>
     );
   }
+  const isToday = viewDay === todayKey();
   return (
     <div>
       <Card>
@@ -790,11 +1108,35 @@ function PacienteView({ patients, patient, selectedPatientId, setSelectedPatient
         </select>
       </Card>
 
+      <EvaScaleCard patient={patient} recordPain={recordPain} />
+
       <Card>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
           <ClipboardList size={16} color="#2F6F62" />
-          <h3 style={{ margin: 0, fontFamily: "'Fraunces', serif", fontSize: 18 }}>Rotina de hoje</h3>
+          <h3 style={{ margin: 0, fontFamily: "'Fraunces', serif", fontSize: 18 }}>Minha rotina</h3>
         </div>
+        <p style={{ fontSize: 12, color: "#8A8574", margin: "0 0 8px" }}>
+          Não conseguiu fazer num dia? Escolha outro dia da semana para fazer a rotina dele agora.
+        </p>
+        <div style={{ display: "flex", gap: 6, marginBottom: 10, overflowX: "auto", paddingBottom: 2 }}>
+          {WEEKDAYS.map((d) => (
+            <button
+              key={d.key}
+              onClick={() => setViewDay(d.key)}
+              style={{
+                flexShrink: 0, padding: "6px 12px", borderRadius: 999, fontSize: 12.5, fontWeight: 600, cursor: "pointer",
+                border: viewDay === d.key ? "1px solid #2F6F62" : "1px solid #E1DED4",
+                background: viewDay === d.key ? "#2F6F62" : "#fff",
+                color: viewDay === d.key ? "#fff" : "#6B6558",
+              }}
+            >
+              {d.short}{d.key === todayKey() ? " •" : ""}
+            </button>
+          ))}
+        </div>
+        <p style={{ fontSize: 12, color: "#8A8574", margin: "0 0 8px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+          {WEEKDAYS.find((d) => d.key === viewDay)?.label}{isToday ? " · hoje" : ""}
+        </p>
         <p style={{ fontSize: 13.5, color: "#6B6558", marginTop: 4 }}>
           {assignedFull.length} exercício(s) prescrito(s) pelo seu fisioterapeuta.
         </p>
@@ -829,7 +1171,7 @@ function PacienteView({ patients, patient, selectedPatientId, setSelectedPatient
   );
 }
 
-function AssignModal({ library, onClose, onAssign }) {
+function AssignModal({ library, onClose, onAssign, dayLabel }) {
   const [exId, setExId] = useState(library[0]?.id);
   const ex = library.find((e) => e.id === exId);
   const [sets, setSets] = useState(ex?.sets ?? 3);
@@ -845,7 +1187,7 @@ function AssignModal({ library, onClose, onAssign }) {
   }, [exId, library]);
 
   return (
-    <ModalShell title="Atribuir exercício" onClose={onClose}>
+    <ModalShell title={`Atribuir exercício${dayLabel ? " · " + dayLabel : ""}`} onClose={onClose}>
       <label style={labelStyle}>Exercício</label>
       <select value={exId} onChange={(e) => setExId(e.target.value)} style={inputStyle}>
         {library.map((e) => (
@@ -882,11 +1224,11 @@ function AssignModal({ library, onClose, onAssign }) {
   );
 }
 
-function AddPatientModal({ onClose, onSave }) {
-  const [name, setName] = useState("");
-  const [condition, setCondition] = useState("");
+function AddPatientModal({ onClose, onSave, initial }) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [condition, setCondition] = useState(initial?.condition ?? "");
   return (
-    <ModalShell title="Novo paciente" onClose={onClose}>
+    <ModalShell title={initial ? "Editar paciente" : "Novo paciente"} onClose={onClose}>
       <label style={labelStyle}>Nome do paciente</label>
       <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: João Carlos" style={inputStyle} />
       <label style={{ ...labelStyle, marginTop: 12 }}>Condição / diagnóstico</label>
@@ -896,23 +1238,62 @@ function AddPatientModal({ onClose, onSave }) {
         onClick={() => onSave(name.trim(), condition.trim())}
         style={{ ...btnPrimary, width: "100%", justifyContent: "center", marginTop: 18, opacity: !name.trim() ? 0.5 : 1 }}
       >
-        Criar paciente
+        {initial ? "Salvar alterações" : "Criar paciente"}
       </button>
     </ModalShell>
   );
 }
 
-function AddExerciseModal({ onClose, onSave }) {
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState("");
-  const [steps, setSteps] = useState("");
-  const [sets, setSets] = useState(3);
-  const [reps, setReps] = useState(10);
-  const [holdSeconds, setHoldSeconds] = useState(0);
-  const [restSeconds, setRestSeconds] = useState(30);
-  const [variant, setVariant] = useState("generic");
+function AddExerciseModal({ onClose, onSave, initial }) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [category, setCategory] = useState(initial?.category ?? "");
+  const [steps, setSteps] = useState(initial?.steps ?? "");
+  const [sets, setSets] = useState(initial?.sets ?? 3);
+  const [reps, setReps] = useState(initial?.reps ?? 10);
+  const [holdSeconds, setHoldSeconds] = useState(initial?.holdSeconds ?? 0);
+  const [restSeconds, setRestSeconds] = useState(initial?.restSeconds ?? 30);
+  const [variant, setVariant] = useState(initial?.variant ?? "generic");
+  const [imageUrl, setImageUrl] = useState(initial?.imageUrl ?? null);
+  const initialVideoIsLink = initial?.videoUrl && !initial.videoUrl.startsWith("data:");
+  const [videoLink, setVideoLink] = useState(initialVideoIsLink ? initial.videoUrl : "");
+  const [videoFileData, setVideoFileData] = useState(initial?.videoUrl && !initialVideoIsLink ? initial.videoUrl : null);
+  const [videoError, setVideoError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function handleImageChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setBusy(true);
+    try {
+      setImageUrl(await compressImageToDataUrl(file));
+    } catch {
+      window.alert("Não foi possível carregar essa imagem.");
+    }
+    setBusy(false);
+  }
+
+  async function handleVideoFileChange(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setVideoError(`Esse arquivo tem ${(file.size / 1024 / 1024).toFixed(1)} MB — grande demais para salvar com segurança. Use um link (YouTube não listado ou Google Drive) em vez disso.`);
+      e.target.value = "";
+      return;
+    }
+    setVideoError("");
+    setBusy(true);
+    try {
+      setVideoFileData(await fileToDataUrl(file));
+    } catch {
+      window.alert("Não foi possível carregar esse vídeo.");
+    }
+    setBusy(false);
+  }
+
+  const finalVideoUrl = videoLink.trim() ? videoLink.trim() : videoFileData;
+
   return (
-    <ModalShell title="Novo exercício na biblioteca" onClose={onClose}>
+    <ModalShell title={initial ? "Editar exercício" : "Novo exercício na biblioteca"} onClose={onClose}>
       <label style={labelStyle}>Nome do exercício</label>
       <input type="text" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Agachamento na parede" style={inputStyle} />
       <label style={{ ...labelStyle, marginTop: 12 }}>Categoria</label>
@@ -946,12 +1327,43 @@ function AddExerciseModal({ onClose, onSave }) {
           <input type="number" min={0} value={restSeconds} onChange={(e) => setRestSeconds(+e.target.value)} style={inputStyle} />
         </div>
       </div>
+      <label style={{ ...labelStyle, marginTop: 16 }}>Foto de demonstração (opcional)</label>
+      {imageUrl && (
+        <div style={{ marginBottom: 8 }}>
+          <img src={imageUrl} alt="Prévia" style={{ width: "100%", maxHeight: 160, objectFit: "cover", borderRadius: 8 }} />
+          <button type="button" onClick={() => setImageUrl(null)} style={{ ...btnSecondary, marginTop: 6, fontSize: 12.5, padding: "5px 10px" }}>
+            Remover foto
+          </button>
+        </div>
+      )}
+      <input type="file" accept="image/*" onChange={handleImageChange} style={inputStyle} />
+
+      <label style={{ ...labelStyle, marginTop: 16 }}>Vídeo de demonstração (opcional)</label>
+      <input
+        type="text"
+        value={videoLink}
+        onChange={(e) => setVideoLink(e.target.value)}
+        placeholder="Cole um link (YouTube, Google Drive, etc.)"
+        style={inputStyle}
+      />
+      <p style={{ fontSize: 12, color: "#8A8574", margin: "8px 0 6px" }}>ou envie um arquivo de vídeo bem curto e leve (até 2MB):</p>
+      <input type="file" accept="video/*" onChange={handleVideoFileChange} style={inputStyle} disabled={!!videoLink.trim()} />
+      {videoError && <p style={{ fontSize: 12.5, color: "#B5493A", marginTop: 6 }}>{videoError}</p>}
+      {videoFileData && !videoLink.trim() && (
+        <button type="button" onClick={() => setVideoFileData(null)} style={{ ...btnSecondary, marginTop: 8, fontSize: 12.5, padding: "5px 10px" }}>
+          Remover vídeo enviado
+        </button>
+      )}
+      <p style={{ fontSize: 11.5, color: "#8A8574", marginTop: 6 }}>
+        Se não enviar foto nem vídeo, o app mostra uma animação simples do personagem durante o exercício.
+      </p>
+
       <button
-        disabled={!name.trim() || !steps.trim()}
-        onClick={() => onSave({ name: name.trim(), category: category.trim() || "Geral", steps: steps.trim(), sets, reps, holdSeconds, restSeconds, variant, videoUrl: null })}
-        style={{ ...btnPrimary, width: "100%", justifyContent: "center", marginTop: 18, opacity: !name.trim() || !steps.trim() ? 0.5 : 1 }}
+        disabled={!name.trim() || !steps.trim() || busy}
+        onClick={() => onSave({ name: name.trim(), category: category.trim() || "Geral", steps: steps.trim(), sets, reps, holdSeconds, restSeconds, variant, imageUrl, videoUrl: finalVideoUrl })}
+        style={{ ...btnPrimary, width: "100%", justifyContent: "center", marginTop: 18, opacity: !name.trim() || !steps.trim() || busy ? 0.5 : 1 }}
       >
-        Adicionar à biblioteca
+        {busy ? "Carregando arquivo…" : initial ? "Salvar alterações" : "Adicionar à biblioteca"}
       </button>
     </ModalShell>
   );
