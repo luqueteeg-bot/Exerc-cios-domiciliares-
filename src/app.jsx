@@ -223,6 +223,24 @@ function PainChart({ painLogs }) {
   );
 }
 
+// O Firebase Realtime Database apaga listas vazias ao salvar — essa função
+// reconstrói essas listas depois de carregar os dados, para o app nunca quebrar.
+function normalizePatient(p) {
+  const week = emptyWeek();
+  if (p.weeklyPlan) {
+    WEEKDAYS.forEach((d) => { week[d.key] = Array.isArray(p.weeklyPlan[d.key]) ? p.weeklyPlan[d.key] : []; });
+  } else if (Array.isArray(p.assigned)) {
+    WEEKDAYS.forEach((d) => { week[d.key] = p.assigned.map((a) => ({ ...a })); });
+  }
+  return {
+    ...p,
+    weeklyPlan: week,
+    sessions: Array.isArray(p.sessions) ? p.sessions : [],
+    appointments: Array.isArray(p.appointments) ? p.appointments : [],
+    painLogs: Array.isArray(p.painLogs) ? p.painLogs : [],
+  };
+}
+
 function CircularTimer({ totalSeconds, secondsLeft, label, color = "#2F6F62" }) {
   const size = 220;
   const stroke = 10;
@@ -548,21 +566,8 @@ export default function App() {
     (async () => {
       const lib = await loadShared("hep-library", DEFAULT_LIBRARY);
       const patsRaw = await loadShared("hep-patients", DEFAULT_PATIENTS);
-      // migração: pacientes salvos antes da agenda semanal tinham uma lista única "assigned"
-      const pats = patsRaw.map((p) => {
-        let next = p;
-        if (!next.weeklyPlan) {
-          const week = emptyWeek();
-          if (Array.isArray(next.assigned)) {
-            WEEKDAYS.forEach((d) => { week[d.key] = next.assigned.map((a) => ({ ...a })); });
-          }
-          const { assigned, ...rest } = next;
-          next = { ...rest, weeklyPlan: week };
-        }
-        if (!Array.isArray(next.painLogs)) next = { ...next, painLogs: [] };
-        return next;
-      });
-      setLibrary(lib);
+      const pats = (Array.isArray(patsRaw) ? patsRaw : DEFAULT_PATIENTS).map(normalizePatient);
+      setLibrary(Array.isArray(lib) && lib.length > 0 ? lib : DEFAULT_LIBRARY);
       setPatients(pats);
       setSelectedPatientId(pats[0]?.id ?? null);
       setLoaded(true);
