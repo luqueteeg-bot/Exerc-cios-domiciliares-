@@ -174,18 +174,29 @@ const DEFAULT_PATIENTS = [
   },
 ];
 
+// ---- Banco de dados na nuvem (Firebase Realtime Database) ----
+// Isso permite que fisioterapeuta e paciente, em aparelhos diferentes, vejam os mesmos dados.
+const DB_URL = "https://exercicios-app-c088c-default-rtdb.firebaseio.com";
+
 async function loadShared(key, fallback) {
   try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
+    const res = await fetch(`${DB_URL}/${key}.json`);
+    if (!res.ok) return fallback;
+    const data = await res.json();
+    return data === null || data === undefined ? fallback : data;
+  } catch (e) {
+    console.error("load error", e);
     return fallback;
   }
 }
 async function saveShared(key, value) {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return true;
+    const res = await fetch(`${DB_URL}/${key}.json`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(value),
+    });
+    return res.ok;
   } catch (e) {
     console.error("storage error", e);
     return false;
